@@ -10,8 +10,8 @@
 - xcframework 两个 slice：
   - `ios-arm64/` — 真机（arm64）
   - `ios-arm64_x86_64-simulator/` — 模拟器（arm64 + x86_64）
-- 每个 slice 内的 `TencentOpenAPI.framework/TencentOpenAPI` 是 **静态库（Mach-O `ar archive`）**，不是动态 framework。集成时必须链接而非嵌入（Embed = Do Not Embed）。
-- 顶层 `_CodeSignature/` 是 Tencent 分发原始形态，`CodeResources` 哈希清单引用 `TencentOpenAPI.framework/...` 路径——**不要重命名 framework 目录或 xcframework 目录**，否则签名清单失配。
+- 每个 slice 内的 `TencentOpenAPI.framework/TencentOpenAPI` 是 **静态库（Mach-O `ar archive`）**，不是动态 framework。链接时符号合入宿主 App，不应在 `Embed Frameworks` 阶段拷贝。
+- **每个 slice 的 framework 结构已规范化**（非腾讯原始形态）：包含 `Info.plist`、`Modules/module.modulemap`（在 framework 根，非 `Headers/` 下）、`Headers/`、`PrivacyInfo.xcprivacy`、`TencentOpenAPI`。`Info.plist` 是为通过 Xcode 26 对 SPM binary target 自动嵌入后的 `did not contain an Info.plist` 校验而注入的；`Modules/` 从 `Headers/` 移到根是为了符合现代 framework 规范。这两项改动**已破坏腾讯原始 `_CodeSignature/CodeResources` 哈希清单**，故顶层 `_CodeSignature/` 已整体删除——本包不再是腾讯原封分发，宿主工程也不会校验该签名。
 - `PrivacyInfo.xcprivacy` 已声明 `NSPrivacyAccessedAPICategoryUserDefaults`（理由 `CA92.1`），随 xcframework 一起分发，宿主 App 无需再重复声明此项。
 
 ## 主要公开头文件
@@ -25,8 +25,8 @@
 
 ## 高优先级 / 容易踩坑的事实
 
-- **SPM target 名 ≠ Swift 模块名（大小写陷阱）**：SPM binary target 名必须等于 xcframework 目录名 → `TencentOpenAPI`（`API` 全大写）；但 `module.modulemap` 定义的模块名是 `TencentOpenApi`（`Api` 仅 `A` 大写）。Swift 端必须 `import TencentOpenApi`，写错大小写会直接报模块找不到。ObjC 端 `@import TencentOpenApi;` 或 `#import <TencentOpenAPI/QQApiInterface.h>` 均可。这个不一致**不能通过重命名修复**——重命名会破坏 `_CodeSignature/CodeResources` 的哈希清单。
-- **是静态库而非动态框架**：链接时符号会被合入宿主 App，不需要在 `Embed Frameworks` 阶段拷贝，也不要在 `LD_RUNPATH_SEARCH_PATHS` 里找它。
+- **SPM target 名 ≠ Swift 模块名（大小写陷阱）**：SPM binary target 名必须等于 xcframework 目录名 → `TencentOpenAPI`（`API` 全大写）；但 `module.modulemap` 定义的模块名是 `TencentOpenApi`（`Api` 仅 `A` 大写）。Swift 端必须 `import TencentOpenApi`，写错大小写会直接报模块找不到。ObjC 端 `@import TencentOpenApi;` 或 `#import <TencentOpenAPI/QQApiInterface.h>` 均可。这个不一致**不能通过重命名修复**——重命名 xcframework 目录或 framework 目录会让 SPM 找不到 binary target。
+- **是静态库而非动态框架**：链接时符号会被合入宿主 App，不需要在 `Embed Frameworks` 阶段拷贝，也不要在 `LD_RUNPATH_SEARCH_PATHS` 里找它。但 Xcode 26 对 SPM binary target 会自动嵌入并在嵌入后校验 `Info.plist`——这就是为何每个 slice 必须带 `Info.plist` 的原因。
 - **不要主动判断 QQ/TIM 是否安装**：`QQApiInterface.h` 注释明确说 SDK 按 `QQ > TIM` 顺序自动回退，已安装任一即可登录/分享；既有 `isQQInstalled` / `isTIMInstalled` 判断逻辑建议移除。
 - **`isTIMSupportApi` 已废弃**：头文件用 `__attribute__((deprecated))` 标注，调用处用 `YES` 替代即可。
 
@@ -42,13 +42,17 @@
 每个版本 = 一个 GitHub Release + 一个 git tag，tag 号 = SDK 版本号 = `Package.swift` 中 url 的版本段。严格按顺序执行：
 
 1. 替换本地 `TencentOpenAPI.xcframework/`（新版 SDK 下发），用 `strings TencentOpenAPI.xcframework/ios-arm64/TencentOpenAPI.framework/TencentOpenAPI | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(_lite)?$'` 确认版本号，`file .../TencentOpenAPI` 确认架构。
-2. `find TencentOpenAPI.xcframework -name ".DS_Store" -delete` 清理噪声文件（否则 checksum 不稳定）。
-3. `zip -r TencentOpenAPI-X.Y.Z.xcframework.zip TencentOpenAPI.xcframework -x "*.DS_Store" -x "*/.DS_Store"`。
-4. `shasum -a 256 TencentOpenAPI-X.Y.Z.xcframework.zip | awk '{print $1}'` 算 checksum。
-5. 更新 `Package.swift` 的 `url`（版本段同步）与 `checksum`；如新版有依赖/plist 变化，同步更新本文件"高优先级 / 容易踩坑的事实"段与 `README.md`。
-6. `git add` + `git commit -m "Bump TencentOpenAPI to X.Y.Z"` + `git push origin main`。
-7. `gh release create X.Y.Z TencentOpenAPI-X.Y.Z.xcframework.zip --title "TencentOpenAPI X.Y.Z" --notes "QQ 互联 OpenAPI iOS SDK X.Y.Z 二进制分发"`。`gh` 会基于当前 HEAD 自动打 tag `X.Y.Z`。
-8. `curl -sL <url> | shasum -a 256` 验证远端 checksum 与本地一致；不一致说明上传有损坏，删 Release 重来。
+2. **规范化每个 slice 的 framework 结构**（腾讯原始分发缺这两项，必须补上否则 Xcode 26 嵌入校验失败）：
+   - 给每个 `TencentOpenAPI.framework/` 注入 `Info.plist`（`CFBundleExecutable=TencentOpenAPI`、`CFBundleIdentifier=com.tencent.mqq.SDKOpenAPI`、`CFBundleShortVersionString/CFBundleVersion` 填 SDK 版本号）。可参考已有的 `ios-arm64/TencentOpenAPI.framework/Info.plist` 复制后改版本号。
+   - 把 `Headers/Modules/` 整体移动到 framework 根目录 `Modules/`（标准位置）。
+   - 删除顶层 `_CodeSignature/`（哈希清单已被上面两步破坏，保留也无意义）。
+3. `find TencentOpenAPI.xcframework -name ".DS_Store" -delete` 清理噪声文件（否则 checksum 不稳定）。
+4. `zip -r TencentOpenAPI-X.Y.Z.xcframework.zip TencentOpenAPI.xcframework -x "*.DS_Store" -x "*/.DS_Store"`。
+5. `shasum -a 256 TencentOpenAPI-X.Y.Z.xcframework.zip | awk '{print $1}'` 算 checksum。
+6. 更新 `Package.swift` 的 `url`（版本段同步）与 `checksum`；如新版有依赖/plist 变化，同步更新本文件"高优先级 / 容易踩坑的事实"段与 `README.md`。
+7. `git add` + `git commit -m "Bump TencentOpenAPI to X.Y.Z"` + `git push origin main`。
+8. `gh release create X.Y.Z TencentOpenAPI-X.Y.Z.xcframework.zip --title "TencentOpenAPI X.Y.Z" --notes "QQ 互联 OpenAPI iOS SDK X.Y.Z 二进制分发"`。`gh` 会基于当前 HEAD 自动打 tag `X.Y.Z`。
+9. `curl -sL <url> | shasum -a 256` 验证远端 checksum 与本地一致；不一致说明上传有损坏，删 Release 重来。
 
 **不可变约定**：
 

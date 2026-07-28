@@ -13,7 +13,7 @@ let package = Package(
         .binaryTarget(
             name: "TencentOpenAPI",
             url: "https://github.com/ze230123/qq-opensdk-ios-xcframework/releases/download/3.6.20/TencentOpenAPI-3.6.20.xcframework.zip",
-            checksum: "e831ac859a09fac0a00f29043a99189f69c46d1ceaed4c2a4c9f06e2e628600f"
+            checksum: "abed1a8e3dfbd4a7ff76e3ea8c1c1b58a2ffa5e6b6904e1037b4f771eeac5a43"
         )
     ]
 )
