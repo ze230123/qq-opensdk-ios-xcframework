@@ -2,7 +2,7 @@
 
 腾讯 QQ 互联 OpenAPI iOS SDK 的 Swift Package Manager 二进制分发仓库。
 
-- 当前 SDK 版本：**3.6.20**
+- 当前 SDK 版本：**3.6.21**（修复 modulemap）
 - 支持架构：真机 `arm64`、模拟器 `arm64` + `x86_64`
 - 最低部署目标：iOS 12.0
 
@@ -13,7 +13,7 @@
    ```
    https://github.com/ze230123/qq-opensdk-ios-xcframework
    ```
-3. Dependency rule 选 **Up to Next Major Version: 3.6.20**，Add Package。
+3. Dependency rule 选 **Up to Next Major Version: 3.6.21**，Add Package。
 4. 在 target 的 Frameworks, Libraries, and Embedded Content 中确认 `TencentOpenAPI` 已添加。SPM binary target 由 Xcode 自动管理嵌入，无需手动设置 Embed 选项。
 
 ## 大小写陷阱（务必注意）
@@ -25,6 +25,8 @@ import TencentOpenApi   // 不是 TencentOpenAPI
 ```
 
 ObjC 端 `@import TencentOpenApi;` 或 `#import <TencentOpenAPI/QQApiInterface.h>` 均可。这个大小写不一致是腾讯 SDK 的固有打包方式，不能通过重命名修复（重命名会让 SPM 找不到 binary target）。
+
+> 3.6.21 修复：`module.modulemap` 缺 `framework` 限定符导致 Clang 无法在 framework 的 `Headers/` 下定位 umbrella header，`import TencentOpenApi` 报 `No such module` / `umbrella header not found`。已改为 `framework module TencentOpenApi { ... }`。
 
 ## 关于 Embed 与 Xcode 26
 
