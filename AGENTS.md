@@ -5,13 +5,13 @@
 ## 仓库结构
 
 - 顶层文件：`Package.swift`（SPM binary target 包装）、`README.md`、`AGENTS.md`、`.gitignore`；xcframework 本体**不进 git**（被 `.gitignore` 排除），仅通过 GitHub Release zip 分发。
-- SDK 版本：**3.6.20**（从二进制 `strings` 提取，`_lite` 是内部变体后缀，分发版本号不带后缀）。
+- SDK 二进制版本：**3.6.20**（从二进制 `strings` 提取，`_lite` 是内部变体后缀）。发行版本号：**3.6.21**（3.6.20 + modulemap/framework 规范化修复，非腾讯版本号变化；`Info.plist` 中的 `CFBundleShortVersionString` 仍填 SDK 二进制版本 `3.6.20`）。
 - 最低部署目标：iOS 12.0（由 `otool -l` 的 `LC_BUILD_VERSION` `minos 12.0` 核实），`Package.swift` 中 `platforms: .iOS(.v12)` 与之对齐。
 - xcframework 两个 slice：
   - `ios-arm64/` — 真机（arm64）
   - `ios-arm64_x86_64-simulator/` — 模拟器（arm64 + x86_64）
 - 每个 slice 内的 `TencentOpenAPI.framework/TencentOpenAPI` 是 **静态库（Mach-O `ar archive`）**，不是动态 framework。链接时符号合入宿主 App，不应在 `Embed Frameworks` 阶段拷贝。
-- **每个 slice 的 framework 结构已规范化**（非腾讯原始形态）：包含 `Info.plist`、`Modules/module.modulemap`（在 framework 根，非 `Headers/` 下）、`Headers/`、`PrivacyInfo.xcprivacy`、`TencentOpenAPI`。`Info.plist` 是为通过 Xcode 26 对 SPM binary target 自动嵌入后的 `did not contain an Info.plist` 校验而注入的；`Modules/` 从 `Headers/` 移到根是为了符合现代 framework 规范。这两项改动**已破坏腾讯原始 `_CodeSignature/CodeResources` 哈希清单**，故顶层 `_CodeSignature/` 已整体删除——本包不再是腾讯原封分发，宿主工程也不会校验该签名。
+- **每个 slice 的 framework 结构已规范化**（非腾讯原始形态）：包含 `Info.plist`、`Modules/module.modulemap`（在 framework 根，非 `Headers/` 下）、`Headers/`、`PrivacyInfo.xcprivacy`、`TencentOpenAPI`。`Info.plist` 是为通过 Xcode 26 对 SPM binary target 自动嵌入后的 `did not contain an Info.plist` 校验而注入的；`Modules/` 从 `Headers/` 移到根是为了符合现代 framework 规范；`module.modulemap` 必须以 `framework module TencentOpenApi` 开头（带 `framework` 限定符），否则 Clang 不会到 `Headers/` 下查找 umbrella header，报 `umbrella header not found` / `No such module`。这三项改动**已破坏腾讯原始 `_CodeSignature/CodeResources` 哈希清单**，故顶层 `_CodeSignature/` 已整体删除——本包不再是腾讯原封分发，宿主工程也不会校验该签名。
 - `PrivacyInfo.xcprivacy` 已声明 `NSPrivacyAccessedAPICategoryUserDefaults`（理由 `CA92.1`），随 xcframework 一起分发，宿主 App 无需再重复声明此项。
 
 ## 主要公开头文件
@@ -42,10 +42,11 @@
 每个版本 = 一个 GitHub Release + 一个 git tag，tag 号 = SDK 版本号 = `Package.swift` 中 url 的版本段。严格按顺序执行：
 
 1. 替换本地 `TencentOpenAPI.xcframework/`（新版 SDK 下发），用 `strings TencentOpenAPI.xcframework/ios-arm64/TencentOpenAPI.framework/TencentOpenAPI | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(_lite)?$'` 确认版本号，`file .../TencentOpenAPI` 确认架构。
-2. **规范化每个 slice 的 framework 结构**（腾讯原始分发缺这两项，必须补上否则 Xcode 26 嵌入校验失败）：
+2. **规范化每个 slice 的 framework 结构**（腾讯原始分发缺这三项，必须补上否则 Xcode 26 嵌入校验失败 / 模块解析失败）：
    - 给每个 `TencentOpenAPI.framework/` 注入 `Info.plist`（`CFBundleExecutable=TencentOpenAPI`、`CFBundleIdentifier=com.tencent.mqq.SDKOpenAPI`、`CFBundleShortVersionString/CFBundleVersion` 填 SDK 版本号）。可参考已有的 `ios-arm64/TencentOpenAPI.framework/Info.plist` 复制后改版本号。
    - 把 `Headers/Modules/` 整体移动到 framework 根目录 `Modules/`（标准位置）。
-   - 删除顶层 `_CodeSignature/`（哈希清单已被上面两步破坏，保留也无意义）。
+   - 确认 `Modules/module.modulemap` 以 `framework module TencentOpenApi` 开头（带 `framework` 限定符），否则 Clang 不会到 `Headers/` 下查找 umbrella header。
+   - 删除顶层 `_CodeSignature/`（哈希清单已被上面步骤破坏，保留也无意义）。
 3. `find TencentOpenAPI.xcframework -name ".DS_Store" -delete` 清理噪声文件（否则 checksum 不稳定）。
 4. `zip -r TencentOpenAPI-X.Y.Z.xcframework.zip TencentOpenAPI.xcframework -x "*.DS_Store" -x "*/.DS_Store"`。
 5. `shasum -a 256 TencentOpenAPI-X.Y.Z.xcframework.zip | awk '{print $1}'` 算 checksum。
